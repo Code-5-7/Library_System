@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Library Entry Log</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Roboto', sans-serif; margin: 0; padding: 0; background-color: #f8f9fa; color: #333; }
+    header { background-color: #003366; color: white; padding: 20px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); position: relative; }
+    header h1 { margin: 0; font-size: 2.5em; display: flex; align-items: center; justify-content: center; gap: 10px; }
+    header img.logo { width: 50px; }
+    #status-dot { width: 14px; height: 14px; border-radius: 50%; display: inline-block; background-color: red; border: 2px solid white; }
+    main { max-width: 1200px; margin: 20px auto; padding: 20px; background-color: white; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+    section { margin-bottom: 40px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+    th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+    th { background-color: #228B22; color: white; font-weight: bold; }
+    tr:nth-child(even) { background-color: #f2f2f2; }
+    tr:hover { background-color: #e0f7fa; transition: background-color 0.3s ease; }
+    footer { text-align: center; padding: 10px; font-size: 0.9em; color: #666; margin-top: 20px; }
+    .highlight { animation: flash 2s ease-out; }
+    @keyframes flash { 0% { background-color: #fff3cd; } 100% { background-color: inherit; } }
+    #toast-container { position: fixed; right: 20px; bottom: 30px; z-index: 1000; display: flex; flex-direction: column-reverse; gap: 10px; }
+    .toast { min-width: 250px; background-color: #333; color: #fff; text-align: center; border-radius: 4px; padding: 12px; font-size: 16px; opacity: 0; transform: translateY(20px); transition: opacity 0.5s, transform 0.5s; cursor: pointer; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>
+      <img class="logo" src="https://via.placeholder.com/50?text=KNLS" alt="KNLS Logo">
+      Welcome to Library Entry Log
+      <span id="status-dot" title="Backend Connection Status"></span>
+    </h1>
+  </header>
+
+  <main>
+    <section>
+      <h2>Recent Check-Ins (Payments)</h2>
+      <table id="entries">
+        <tr><th>Name</th><th>Entry Time</th><th>Amount (KSh)</th><th>Group Size</th></tr>
+      </table>
+    </section>
+    <section>
+      <h2>Active Members</h2>
+      <table id="active">
+        <tr><th>Name</th><th>Phone</th><th>Start Time</th><th>End Time</th></tr>
+      </table>
+    </section>
+  </main>
+
+  <footer>Powered by KNLS-Inspired Design | Real-Time Updates | Supports Group Payments</footer>
+  <div id="toast-container"></div>
+
+  <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+  <script>
+    const socket = io('http://localhost:3000'); // Update for production
+    const statusDot = document.getElementById("status-dot");
+
+    function playBeep() {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = ctx.createOscillator();
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(880, ctx.currentTime);
+      oscillator.connect(ctx.destination);
+      oscillator.start();
+      oscillator.stop(ctx.currentTime + 0.2);
+    }
+
+    function showToast(message, rowElement) {
+      const container = document.getElementById("toast-container");
+      const toast = document.createElement("div");
+      toast.className = "toast";
+      toast.innerText = message;
+      toast.addEventListener("click", () => {
+        if (rowElement) {
+          rowElement.scrollIntoView({ behavior: "smooth", block: "center" });
+          rowElement.classList.add("highlight");
+          setTimeout(() => rowElement.classList.remove("highlight"), 2000);
+        }
+        container.removeChild(toast);
+      });
+      container.appendChild(toast);
+      setTimeout(() => toast.classList.add("show"), 50);
+      setTimeout(() => {
+        toast.classList.remove("show");
+        setTimeout(() => { if (container.contains(toast)) container.removeChild(toast); }, 500);
+      }, 4000);
+    }
+
+    function updateTable(tableId, data, key, columns) {
+      const table = document.getElementById(tableId);
+      let row = Array.from(table.rows).find(r => r.cells[key]?.innerText === data[columns[key]]);
+      if (row) {
+        columns.forEach((col, idx) => row.cells[idx].innerText = data[col]);
+      } else {
+        row = table.insertRow(1);
+        columns.forEach(col => { const cell = row.insertCell(); cell.innerText = data[col]; });
+      }
+      row.classList.add("highlight");
+      setTimeout(() => row.classList.remove("highlight"), 2000);
+      return row;
+    }
+
+    // Load active members on start
+    fetch('http://localhost:3000/active_members')
+      .then(res => res.json())
+      .then(members => {
+        members.forEach(member => {
+          updateTable('active', {
+            fullName: member.full_name,
+            phone: member.phone,
+            startTime: new Date(member.start_time).toLocaleString(),
+            endTime: new Date(member.end_time).toLocaleString()
+          }, 1, ['fullName', 'phone', 'startTime', 'endTime']);
+        });
+      });
+
+    // Real-time events
+    socket.on('new_entry', (entry) => {
+      const row = document.getElementById('entries').insertRow(1);
+      row.insertCell(0).innerText = entry.fullName;
+      row.insertCell(1).innerText = new Date(entry.entryTime).toLocaleString();
+      row.insertCell(2).innerText = entry.amount;
+      row.insertCell(3).innerText = entry.groupSize;
+      row.classList.add("highlight");
+      setTimeout(() => row.classList.remove("highlight"), 2000);
+      playBeep();
+      showToast(`📥 New entry: ${entry.fullName}`, row);
+    });
+
+    socket.on('update_membership', (membership) => {
+      const row = updateTable('active', {
+        fullName: membership.fullName,
+        phone: membership.phone,
+        startTime: new Date(membership.startTime).toLocaleString(),
+        endTime: new Date(membership.endTime).toLocaleString()
+      }, 1, ['fullName', 'phone', 'startTime', 'endTime']);
+      playBeep();
+      showToast(`✅ Membership updated: ${membership.fullName}`, row);
+    });
+
+    // Connection status via Socket.IO
+    socket.on('connect', () => {
+      statusDot.style.backgroundColor = 'limegreen';
+      showToast("🟢 Connected to backend");
+    });
+    socket.on('disconnect', () => {
+      statusDot.style.backgroundColor = 'red';
+      showToast("🔴 Disconnected from backend");
+    });
+
+    // HTTP ping check every 5 seconds
+    setInterval(() => {
+      fetch('http://localhost:3000/ping')
+        .then(res => {
+          if (res.ok) {
+            statusDot.style.backgroundColor = 'limegreen';
+          } else {
+            statusDot.style.backgroundColor = 'red';
+          }
+        })
+        .catch(() => {
+                    statusDot.style.backgroundColor = 'red';
+                  });
+              }, 5000);
+            </script>
+          </body>
+          </html>
